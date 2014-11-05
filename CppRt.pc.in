@@ -1,0 +1,11 @@
+prefix=@PC_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: cpprt
+Description: Cpp RT tools
+Version: @PC_VERSION@
+Requires:
+Libs: -L${libdir} -lCppRt
+Cflags: -I${includedir}
