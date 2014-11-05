@@ -5,11 +5,11 @@ cpprt depends only on the STL framework and is C++98 compliant.
 
 #Build:
 
-1. _using old build style % defined makefile_
+1. using old build style % defined makefile
 make [OUTPUT_ROOT=<current dir by default>] [MODE=<release/debug>] [STATIC=<yes/no>]
 successful generation will build a library in OUTPUT_ROOT/mode/CppRT.[a/so]
 
-2. _using cmake method_
+2. using cmake method
 the default install directory is "/usr"
 
 -If you want to install to another destination then use the CMAKE_INSTALL_PREFIX option to set the target dir. 
@@ -17,9 +17,9 @@ the default install directory is "/usr"
 -If you whant to enable doxygen documenetation build then set CMAKE_INSTALL_PREFIX to ON
 
 #Example : 
-_build and install to mydir target directory by enabling doxygen build
+build and install to mydir target directory by enabling doxygen build
 
->from root source dir_:
+>from root source dir:
 
 $mkdir buid
 
