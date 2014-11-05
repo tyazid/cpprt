@@ -1,5 +1,3 @@
-#summary One-sentence summary of this page.
-
 = Introduction =
 
 cpprt is a C++ framework with a high level of abstraction. It exposes a high level public API exposing some runtime utils features and provide facilities to extends features  to support a specific implementation. 
