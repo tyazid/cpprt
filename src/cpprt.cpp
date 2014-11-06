@@ -45,12 +45,6 @@ using namespace std;
 using namespace util;
 namespace util {
 
-#ifdef __GNUC__
-// do my gcc specific stuff
-
-#else
-// ... handle this for other compilers
-#endif
 
 static bool existTh(vector<pthread_t> & locked) // Mutex* This)
 {
