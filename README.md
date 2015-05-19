@@ -14,7 +14,7 @@ the default install directory is "/usr"
 
 -If you want to install to another destination then use the CMAKE_INSTALL_PREFIX option to set the target dir. 
 
--If you whant to enable doxygen documenetation build then set CMAKE_INSTALL_PREFIX to ON
+-If you whant to enable doxygen documenetation build then set DBUILD_DOCUMENTATION to ON
 
 #Example : 
 build and install to mydir target directory by enabling doxygen build
