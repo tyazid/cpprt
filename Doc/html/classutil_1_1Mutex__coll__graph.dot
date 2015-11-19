@@ -1,0 +1,7 @@
+digraph "util::Mutex"
+{
+  bgcolor="transparent";
+  edge [fontname="Helvetica",fontsize="10",labelfontname="Helvetica",labelfontsize="10"];
+  node [fontname="Helvetica",fontsize="10",shape=record];
+  Node1 [label="{util::Mutex\n||+ ~Mutex()\l+ Mutex()\l+ Mutex()\l+ Mutex()\l+ Wait()\l+ Wait()\l+ Notify()\l+ NotifyAll()\l+ operator bool()\l+ Release()\l+ Acquire()\l}",height=0.2,width=0.4,color="black", fillcolor="grey75", style="filled" fontcolor="black"];
+}

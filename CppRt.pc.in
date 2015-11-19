@@ -1,11 +1,11 @@
 prefix=@PC_PREFIX@
-exec_prefix=${prefix}
 libdir=${prefix}/lib
 includedir=${prefix}/include
 
 Name: cpprt
-Description: Cpp RT tools
+Description: CppRT tools
 Version: @PC_VERSION@
 Requires:
-Libs: -L${libdir} -lCppRt
+Libs: -L${libdir} -lcpprt
 Cflags: -I${includedir}
+ 

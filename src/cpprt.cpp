@@ -167,7 +167,7 @@ bool Mutex::Wait(long int time)
 	if (time > 0)
 	{
 		struct timespec ts;
-		assert(!setTime(time, ts));
+		setTime(time, ts);
 		rc = pthread_cond_timedwait(ctx->cond_waiter, ctx->mutex, &ts);
 	} else
 	{
@@ -287,15 +287,13 @@ _run(task ? task : this), appData(NULL)
 	_pthread.x = ULONG_MAX;
 }
 #else
-Thread::Thread() :
-
-		_run(this), _pthread(ULONG_MAX), appData(NULL)
+Thread::Thread(bool deamon) :_run(this), _pthread(ULONG_MAX), appData(NULL),_deamon(deamon)
 {
 	DLOG_INF();
 	DLOG_OUTF();
 }
-Thread::Thread(Runnable* task) :
-		_run(task ? task : this), _pthread(ULONG_MAX), appData(NULL)
+Thread::Thread(Runnable* task ,bool deamon) :
+		_run(task ? task : this), _pthread(ULONG_MAX), appData(NULL),_deamon(deamon)
 {
 	DLOG_INF();
 		DLOG_OUTF();
@@ -303,13 +301,21 @@ Thread::Thread(Runnable* task) :
 #endif
 
 Thread::Thread(const Thread&other) :
-		_run(other._run), _pthread(other._pthread), appData(other.appData)
+		_run(other._run), _pthread(other._pthread), appData(other.appData),_deamon(other._deamon)
 {
 }
 Thread::~Thread()
 {
-	DLOG_INF();
-	DLOG_LOGL( " Thread DESTROY  ON TH =" << this);
+	DLOG_INF(); DLOG_LOGL( " Thread DESTROY  ON TH =" << this);
+	if (!this->_deamon) {
+		if (_pthread != ULONG_MAX) {
+			try {
+				pthread_detach(_pthread);
+			} catch (...) {
+				DLOG_LOGL( " pthread_detach  failed  on TH" <<this );
+			}
+		}
+	}
 	Join();
 	DLOG_OUTF();
 }
