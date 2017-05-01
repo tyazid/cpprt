@@ -25,26 +25,117 @@
  *      Author: tyazid
  */
 
-#include <set>
-#include <vector>
-#include <iostream>
-#include <exception>
-#include <stdexcept>
-#include <queue>
-#include <pthread.h>
-#include <time.h>
-#include <climits>
-#include <errno.h>
-#include <sys/types.h>
-#include <stdlib.h>
-#include <string.h>
-#include <cassert>
-#include "../inc/cpprt.h"
+
 #include "rt_internal.h"
+
+
 using namespace std;
 using namespace util;
-namespace util {
 
+namespace util {
+class JobQueue;
+static JobQueue* defaultJobQueue(bool );
+/** POOL JOB **/
+ class Job{
+ public:
+	 Job(util::Runnable *  job,void*  jobArg);
+	 virtual ~Job();
+	util::Runnable *  runnable;
+ 	void*  arg;
+
+} ;
+ Job::Job(util::Runnable *job,void*  jobArg):runnable(job),arg(jobArg){}
+ Job::~Job(){
+	 if(runnable) delete runnable;
+  }
+
+ /** POOL QUEUE **/
+ class JobQueue{
+ public :
+	 JobQueue(){ }
+	 virtual ~JobQueue(){
+		 Job*j=NULL;
+		 while((j=this->popJob()))
+			 delete j;
+	 }
+	void addJob(util::Runnable* rjob, void*arg) {
+		synchronized(this->mutex)
+		{
+			this->jobs.push(new util::Job(rjob, arg));
+		}
+	}
+	Job* popJob() {
+		Job*j = NULL;
+	 	synchronized(this->mutex)
+		{
+			if (this->jobs.empty())
+				j= NULL;
+			else {
+			 j = this->jobs.front();
+			 this->jobs.pop();
+			}
+
+		}
+		return j;
+	}
+	std::queue<Job*> jobs;
+	util::Mutex mutex;
+ } ;
+
+ class RunnableThreadPool: public Runnable
+ {
+ private:
+ Mutex& notifyer;
+
+ public:
+	RunnableThreadPool(Mutex& owner) :
+			notifyer(owner) {
+	}
+	virtual ~RunnableThreadPool() {
+
+	}
+	void Run(void*arg) {
+		Job*job = NULL;
+		JobQueue* q = defaultJobQueue(false);
+		// std::cout<<std::endl<<"--------- RunnableThreadPool Q -------- ?::"<< (q->jobs.size())<<std::endl;
+
+		while ((job = q->popJob())){
+			// std::cout<<"===============> POPED JOB (in:"<< (this) << ") J:"<< job->runnable<<std::endl;
+
+			job->runnable->Run(job->arg);
+		}
+
+ 		//synchronized(this->notifyer)
+		//{
+	//		this->notifyer.NotifyAll();
+//		}
+		printf("***>>>ALL JOB DONE FOR %p\n",this);
+
+	}
+
+};
+
+static unsigned coreNumber(void) {
+	static int num_threads = -1;
+	if (num_threads == -1)
+		num_threads= (int)sysconf( _SC_NPROCESSORS_ONLN );
+	if(num_threads == -1)
+		num_threads=MIN_NB_TH_POOL;
+	return num_threads;
+}
+
+
+
+static JobQueue* defaultJobQueue(bool release) {
+	static JobQueue* Q = NULL;
+	if (release) {
+		delete Q;
+		Q = NULL;
+	} else {
+		Q = Q == NULL ? new JobQueue : Q;
+	}
+	return Q;
+}
 
 static bool existTh(vector<pthread_t> & locked) // Mutex* This)
 {
@@ -257,9 +348,13 @@ static void *doIt(void *arg)
 {
 	DLOG_INF();
 	Thread_Ctx* parm = (Thread_Ctx*) arg;
+	// std::cout<<std::endl<<"--------- IN DOIT -------- ?::"<< ((parm && parm->job)?1:0)<<std::endl;
+
 	if (parm && parm->job)
 		try
 		{
+			// std::cout<<std::endl<<"--------- STARTING JOB  -------- ?::"<< (parm->job)<<std::endl;
+
 			parm->job->Run(parm->app_data);
 		} catch (...)
 		{
@@ -271,10 +366,12 @@ static void *doIt(void *arg)
 		parm->job = NULL;
 		delete parm;
 	}
+	// std::cout<<std::endl<<"--------- OUT DOIT -------- ?::"<< ((parm && parm->job)?1:0)<<std::endl;
+
 	DLOG_OUTF();
 	return NULL;  // ((Thread *)context)->doIt(((Thread *)context)->appData);
 }
-#if defined _WIN32
+#ifdef _WIN32
 Thread::Thread() :
 
 _run(this), appData(NULL)
@@ -287,21 +384,38 @@ _run(task ? task : this), appData(NULL)
 	_pthread.x = ULONG_MAX;
 }
 #else
-Thread::Thread(bool deamon) :_run(this), _pthread(ULONG_MAX), appData(NULL),_deamon(deamon)
+Thread::Thread(bool deamon) :_run(this), _pthread(ULONG_MAX), appData(NULL),_deamon(deamon),_hyperthread_core_id(0),hyper(false)
 {
 	DLOG_INF();
 	DLOG_OUTF();
 }
-Thread::Thread(Runnable* task ,bool deamon) :
-		_run(task ? task : this), _pthread(ULONG_MAX), appData(NULL),_deamon(deamon)
+Thread::Thread(Runnable* task ,bool deamon,int hyperthreadCoreId) :
+		_run(task ? task : this),
+#ifdef __APPLE__
+	 thread_helper(false),
+
+#endif /* __APPLE__*/
+	_pthread(ULONG_MAX),
+	appData(NULL),
+	_deamon(deamon),
+	_hyperthread_core_id(hyperthreadCoreId),
+	hyper(hyperthreadCoreId>=0?true:false)
 {
 	DLOG_INF();
-		DLOG_OUTF();
+	DLOG_OUTF();
 }
-#endif
+
+
+
+#endif /* _WIN32*/
 
 Thread::Thread(const Thread&other) :
-		_run(other._run), _pthread(other._pthread), appData(other.appData),_deamon(other._deamon)
+		_run(other._run), 
+		_pthread(other._pthread),
+		appData(other.appData),
+		_deamon(other._deamon),
+		_hyperthread_core_id(other._hyperthread_core_id),
+		hyper(other.hyper)
 {
 }
 Thread::~Thread()
@@ -341,7 +455,35 @@ void Thread::Start(void* arg)
 		parm->app_data = NULL;
 		parm->job = NULL;
 		delete parm;
-	}
+	} else
+	{
+		/*hyper threading stuff.*/
+		  int num_threads =coreNumber();
+
+		if (num_threads != -1 && this->_hyperthread_core_id >= 0
+				&& this->_hyperthread_core_id < num_threads) {
+			cpu_set_t cpuset;
+			CPU_ZERO(&cpuset);
+			CPU_SET(this->_hyperthread_core_id, &cpuset);
+			int rc = pthread_setaffinity_np(this->_pthread,
+					sizeof(cpu_set_t), &cpuset);
+			if (rc != 0) {
+				std::cerr << "!!!!Error calling pthread_setaffinity_np: " << rc
+						<< "\n";
+			}
+
+			rc = pthread_getaffinity_np(this->_pthread,
+					sizeof(cpu_set_t), &cpuset);
+			if (rc != 0)
+				std::cerr << "!!!!Error calling pthread_getaffinity_np: " << rc
+						<< "\n";
+ 			if (!CPU_ISSET(this->_hyperthread_core_id, &cpuset))
+				std::cerr << "!!!!Error : could not set cpu affinity cpu: "
+						<< this->_hyperthread_core_id << "\n";
+
+
+		}
+	} 
 	DLOG_OUTF();
 }
 
@@ -362,6 +504,115 @@ void Thread::Join()
 	}
 #endif
 	DLOG_OUTF();
-}
 
 }
+//IsAlive
+bool Thread::IsAlive() {
+	return (_pthread != ULONG_MAX) && (pthread_kill(_pthread, 0) == ESRCH) ?
+			true : false;
+}
+
+#define ALIGN_TH_POOL(N) N<MIN_NB_TH_POOL?\
+						 MIN_NB_TH_POOL:(N>coreNumber()? coreNumber()  : N)
+
+ThreadPool::ThreadPool(unsigned num_threads):tnumber( ALIGN_TH_POOL(num_threads)),
+											 hyperThreaded(false),working(0),threads(new std::vector<Thread*>())
+											 {
+
+}
+ThreadPool::ThreadPool(bool hyperthread):tnumber(MIN_NB_TH_POOL),
+										hyperThreaded(hyperthread),
+										working(0),
+										threads(new std::vector<Thread*>()){
+
+	this->tnumber= (hyperthread?ALIGN_TH_POOL(coreNumber()):MIN_NB_TH_POOL);
+
+}
+
+ThreadPool::ThreadPool(unsigned num_threads, bool hyperthread):
+										tnumber( ALIGN_TH_POOL(num_threads)),
+										hyperThreaded(hyperthread),
+										working(0),
+										threads(new std::vector<Thread*>())
+										 {}
+
+ThreadPool::ThreadPool(const ThreadPool& other):tnumber( ALIGN_TH_POOL(other.tnumber)),
+												hyperThreaded(other.hyperThreaded),
+												threads(new std::vector<Thread*>()),
+												working(0) {}
+
+
+
+
+void ThreadPool::AddTask(Runnable* task, void* arg) {
+	 JobQueue* q = defaultJobQueue(false);
+	 q->addJob(task,arg);
+	 std::cout<<"IN AddTask PendingTasks=="<< this->PendingTasks()<<std::endl;
+
+}
+
+
+unsigned ThreadPool::WorkingThreads() {
+	unsigned w=0;
+
+
+	for ( size_t i = 0; i <  this->threads->size(); i++ )
+	 	  if(this->threads->at(i) && this->threads->at(i)->IsAlive())
+	 		  w++;
+	return w;
+}
+
+unsigned ThreadPool::PendingTasks() {
+	 JobQueue* q = defaultJobQueue(false);
+	return q->jobs.size();
+}
+
+//PendingTasks
+void ThreadPool::Join() {
+	 std::cout<<"IN Join "<<std::endl;
+
+	 for ( size_t i = 0; i <  this->threads->size(); i++ ){
+
+	 	 	  if(this->threads->at(i) )
+	 	 		this->threads->at(i)->Join();
+	 }
+
+ /*  synchronized(this->lock){
+		while(this->WorkingThreads() || this->PendingTasks()){
+			 std::cout<<"IN Join WorkingThreads=="<< this->WorkingThreads() <<" PendingTasks=="<< this->PendingTasks()<<std::endl;
+			this->lock.Wait();
+		}
+	}*/
+	 std::cout<<"OUT Join."<<std::endl;
+
+ }
+
+/*!
+ *\brief Causes this thread pool to begin executions.
+ */
+void ThreadPool::Start() {
+	 std::cout<<"IN Start WorkingThreads=="<< this->WorkingThreads() <<" PendingTasks=="<< this->PendingTasks()<<std::endl;
+	if (this->WorkingThreads() || !this->PendingTasks())
+		return;
+
+	 std::cout<<"IN Start in progress ..."<<std::endl;
+
+	unsigned l = std::min(this->PendingTasks(),this->tnumber);
+	for(unsigned instance = 0;instance < l;instance++) {
+		Thread *thread =NULL;
+ 		 std::cout<<"     > Starting  "<<instance<< "/"<<l<<std::endl;
+  		thread=new Thread(new RunnableThreadPool(this->lock ) ,false,instance);
+  		thread->Start(NULL);
+  		this->threads->push_back(thread);
+	}
+	 std::cout<<"IN Start in Done ..."<<std::endl;
+}
+ThreadPool::~ThreadPool() {
+	for ( size_t i = 0; i <  this->tnumber; i++ )
+ 	  delete this->threads->at(i) ;
+	delete this->threads ;
+}
+}
+
+
+

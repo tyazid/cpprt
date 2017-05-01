@@ -41,6 +41,8 @@
 #include <exception>
 #include <stdexcept>
 #include <queue>
+//#include <thread>
+
 #include <pthread.h>
 #include <sstream>
 #include <algorithm>
@@ -51,6 +53,7 @@
 #include <typeinfo>
 #include <sys/types.h>
 #include "dbg.h"
+#define MIN_NB_TH_POOL 2
 /*!
  *  \brief utils namespace offering a simple way to use synchronizing mechanism and event - queuing.
  */
@@ -188,9 +191,16 @@ public:
 class Thread: virtual public Runnable {
 private:
 	Runnable* _run;
+	//std::thread *thread;
 	pthread_t _pthread;
 	void* appData;
 	bool _deamon;
+	int _hyperthread_core_id;
+	bool hyper;
+	#ifdef __APPLE__
+	bool thread_helper;
+	#endif
+
 
 public:
 	/**
@@ -206,8 +216,9 @@ public:
 	 *@param task the Runnable task to execute.
 	 *@param deamon if true mean that the thread will keep alive until it finish its run method even id should wait during its
 	 *destruction.
+	 *@hyperthreadCoreId Limit specified thread  to run only on the processor represented by the coreID.
 	 */
-	Thread(Runnable* task, bool deamon=false);
+	Thread(Runnable* task, bool deamon=false, int hyperthreadCoreId=-1);
 	/**
 	 * \brief Copy constructor.
 	 * @param other Thread to copy from.
@@ -231,7 +242,56 @@ public:
 	 *\brief  Waits for this thread to finish.
 	 */
 	virtual void Join();
+
+	virtual bool IsAlive();
 };
+
+/***************************************************************/
+/**************************ThreadPool***************************/
+/***************************************************************/
+/*!
+ * \brief A simple thread Pool.
+ */
+class ThreadPool {
+private :
+	unsigned tnumber;
+	bool hyperThreaded;
+	unsigned working;
+	Mutex lock;
+	std::vector<Thread*>* threads;
+public:
+	//h == treu --> nbth == nb core.
+	ThreadPool(bool hyperthread =false);
+
+	ThreadPool(unsigned num_threads = MIN_NB_TH_POOL);
+	ThreadPool(unsigned num_threads = MIN_NB_TH_POOL, bool hyperthread =false);
+	ThreadPool(const ThreadPool&other);
+
+	/*!
+	 *\brief  Add work to the job queue.
+	 */
+	virtual void AddTask(Runnable* task, void *arg);
+
+	/*!
+	 *\brief Gets currently working threads number.
+	 */
+	virtual unsigned WorkingThreads();
+	/*!
+	 *\brief Gets currently pending task (not yet started) number.
+	 */
+	virtual unsigned PendingTasks();
+	/*!
+	 *\brief  Waits for all threads to finish( task job became empty & all thread are in idle state)).
+	 */
+	virtual void Join();
+	/*!
+	 *\brief Causes this thread pool to begin executions.
+	 */
+	virtual void Start();
+
+	virtual ~ThreadPool();
+};
+
 
 /***************************************************************/
 /**************************EventQueue***************************/
