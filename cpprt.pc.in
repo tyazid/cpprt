@@ -1,0 +1,11 @@
+prefix=@PC_PREFIX@
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: cpprt
+Description: CppRT tools
+Version: @PC_VERSION@
+Requires:
+Libs: -L${libdir} -lcpprt
+Cflags: -I${includedir}
+ 
