@@ -608,10 +608,10 @@ void ThreadPool::Start() {
 	 std::cout<<"IN Start in Done ..."<<std::endl;
 }
 ThreadPool::~ThreadPool() {
-	for ( size_t i = 0; i <  this->tnumber; i++ )
+ 	for ( size_t i = 0; i < this->threads->size(); i++ )
  	  delete this->threads->at(i) ;
 	delete this->threads ;
-}
+ }
 }
 
 
