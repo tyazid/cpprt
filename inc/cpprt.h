@@ -53,6 +53,7 @@
 #include <typeinfo>
 #include <sys/types.h>
 #include "dbg.h"
+
 #define MIN_NB_TH_POOL 2
 /*!
  *  \brief utils namespace offering a simple way to use synchronizing mechanism and event - queuing.
@@ -258,7 +259,7 @@ private :
 	bool hyperThreaded;
 	unsigned working;
 	Mutex lock;
-	std::vector<Thread*>* threads;
+	std::vector<Thread*> threads;
 public:
 	//h == treu --> nbth == nb core.
 	ThreadPool(bool hyperthread =false);
@@ -290,6 +291,9 @@ public:
 	virtual void Start();
 
 	virtual ~ThreadPool();
+
+	void* jobQ; /*opaque*/
+
 };
 
 

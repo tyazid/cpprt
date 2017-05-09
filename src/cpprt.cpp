@@ -34,7 +34,7 @@ using namespace util;
 
 namespace util {
 class JobQueue;
-static JobQueue* defaultJobQueue(bool );
+//static JobQueue* defaultJobQueue(bool );
 /** POOL JOB **/
  class Job{
  public:
@@ -85,47 +85,63 @@ static JobQueue* defaultJobQueue(bool );
  class RunnableThreadPool: public Runnable
  {
  private:
- Mutex& notifyer;
+	   JobQueue* _jq;
 
  public:
-	RunnableThreadPool(Mutex& owner) :
-			notifyer(owner) {
+	RunnableThreadPool(  JobQueue* jq) :
+		_jq(jq) {
+		//this->lock
 	}
 	virtual ~RunnableThreadPool() {
 
 	}
 	void Run(void*arg) {
 		Job*job = NULL;
-		JobQueue* q = defaultJobQueue(false);
-		// std::cout<<std::endl<<"--------- RunnableThreadPool Q -------- ?::"<< (q->jobs.size())<<std::endl;
 
-		while ((job = q->popJob())){
+ 		// std::cout<<std::endl<<"--------- RunnableThreadPool Q -------- ?::"<< (q->jobs.size())<<std::endl;
+		while ((job = this->_jq->popJob())){
 			// std::cout<<"===============> POPED JOB (in:"<< (this) << ") J:"<< job->runnable<<std::endl;
-
 			job->runnable->Run(job->arg);
 		}
-
  		//synchronized(this->notifyer)
 		//{
 	//		this->notifyer.NotifyAll();
 //		}
 		printf("***>>>ALL JOB DONE FOR %p\n",this);
-
 	}
 
 };
 
-static unsigned coreNumber(void) {
-	static int num_threads = -1;
-	if (num_threads == -1)
-		num_threads= (int)sysconf( _SC_NPROCESSORS_ONLN );
-	if(num_threads == -1)
-		num_threads=MIN_NB_TH_POOL;
-	return num_threads;
-}
+
+ static unsigned ncpus(void) {
+ 	unsigned nprocs = 0;
+ 	FILE *cmd = popen("grep '^processor' /proc/cpuinfo | wc -l", "r");
+ 	if (cmd) {
+ 		size_t n;
+ 		char buff[8];
+ 		if ((n = fread(buff, 1, sizeof(buff) - 1, cmd)) > 0) {
+ 			buff[n] = '\0';
+ 			if (sscanf(buff, "%u", &nprocs) != 1)
+ 				nprocs = 0;
+ 		}
+ 		pclose(cmd);
+ 	}
+ 	return nprocs;
+ }
+
+ /* nb core */
+  static unsigned coreNumber(void) {
+  	static unsigned num_threads = 0;
+ 	if (!num_threads) {
+ 		if (!(num_threads = (unsigned) sysconf( _SC_NPROCESSORS_ONLN))
+ 				&& !(num_threads = ncpus()))
+ 			num_threads = MIN_NB_TH_POOL;
+ 	}
+  	return num_threads;
+  }
 
 
-
+/*
 static JobQueue* defaultJobQueue(bool release) {
 	static JobQueue* Q = NULL;
 	if (release) {
@@ -136,7 +152,7 @@ static JobQueue* defaultJobQueue(bool release) {
 	}
 	return Q;
 }
-
+*/
 static bool existTh(vector<pthread_t> & locked) // Mutex* This)
 {
 	pthread_t thread = pthread_self();
@@ -421,6 +437,7 @@ Thread::Thread(const Thread&other) :
 Thread::~Thread()
 {
 	DLOG_INF(); DLOG_LOGL( " Thread DESTROY  ON TH =" << this);
+	Join();
 	if (!this->_deamon) {
 		if (_pthread != ULONG_MAX) {
 			try {
@@ -430,7 +447,7 @@ Thread::~Thread()
 			}
 		}
 	}
-	Join();
+
 	DLOG_OUTF();
 }
 void Thread::Run(void* arg)
@@ -497,11 +514,14 @@ void Thread::Join()
 		_pthread.x = ULONG_MAX;
 	}
 #else
+
 	if (_pthread != ULONG_MAX)
-	{
+	{	 std::cout<<">>>TH.Join IN "<<std::endl;
+
 		pthread_join(_pthread, NULL);
 		_pthread = ULONG_MAX;
-	}
+	}else
+		std::cout<<">>>TH.Join NOT "<<std::endl;
 #endif
 	DLOG_OUTF();
 
@@ -516,14 +536,13 @@ bool Thread::IsAlive() {
 						 MIN_NB_TH_POOL:(N>coreNumber()? coreNumber()  : N)
 
 ThreadPool::ThreadPool(unsigned num_threads):tnumber( ALIGN_TH_POOL(num_threads)),
-											 hyperThreaded(false),working(0),threads(new std::vector<Thread*>())
+											 hyperThreaded(false),working(0),jobQ(NULL)
 											 {
 
 }
 ThreadPool::ThreadPool(bool hyperthread):tnumber(MIN_NB_TH_POOL),
 										hyperThreaded(hyperthread),
-										working(0),
-										threads(new std::vector<Thread*>()){
+										working(0) ,jobQ(NULL){
 
 	this->tnumber= (hyperthread?ALIGN_TH_POOL(coreNumber()):MIN_NB_TH_POOL);
 
@@ -532,22 +551,24 @@ ThreadPool::ThreadPool(bool hyperthread):tnumber(MIN_NB_TH_POOL),
 ThreadPool::ThreadPool(unsigned num_threads, bool hyperthread):
 										tnumber( ALIGN_TH_POOL(num_threads)),
 										hyperThreaded(hyperthread),
-										working(0),
-										threads(new std::vector<Thread*>())
-										 {}
+										working(0) ,jobQ(NULL) {}
 
 ThreadPool::ThreadPool(const ThreadPool& other):tnumber( ALIGN_TH_POOL(other.tnumber)),
 												hyperThreaded(other.hyperThreaded),
-												threads(new std::vector<Thread*>()),
-												working(0) {}
+												working(0),jobQ(NULL) {}
 
 
 
 
 void ThreadPool::AddTask(Runnable* task, void* arg) {
-	 JobQueue* q = defaultJobQueue(false);
-	 q->addJob(task,arg);
-	 std::cout<<"IN AddTask PendingTasks=="<< this->PendingTasks()<<std::endl;
+	if (!this->jobQ)
+		this->jobQ = new JobQueue;
+
+	JobQueue* q = (JobQueue*) this->jobQ;
+//	 JobQueue* q = defaultJobQueue(false);
+	q->addJob(task, arg);
+	std::cout << "IN AddTask PendingTasks==" << this->PendingTasks()
+			<< std::endl;
 
 }
 
@@ -556,62 +577,60 @@ unsigned ThreadPool::WorkingThreads() {
 	unsigned w=0;
 
 
-	for ( size_t i = 0; i <  this->threads->size(); i++ )
-	 	  if(this->threads->at(i) && this->threads->at(i)->IsAlive())
+	for ( size_t i = 0; i <  this->threads.size(); i++ )
+	 	  if(  this->threads[i]->IsAlive())
 	 		  w++;
 	return w;
 }
 
 unsigned ThreadPool::PendingTasks() {
-	 JobQueue* q = defaultJobQueue(false);
+	 JobQueue* q =( JobQueue* )this->jobQ;
 	return q->jobs.size();
 }
 
 //PendingTasks
 void ThreadPool::Join() {
 	 std::cout<<"IN Join "<<std::endl;
+	 for ( size_t i = 0; i <  this->threads.size(); i++ ){
+		 std::cout<<"--- Join:"<<i<<std::endl;
 
-	 for ( size_t i = 0; i <  this->threads->size(); i++ ){
-
-	 	 	  if(this->threads->at(i) )
-	 	 		this->threads->at(i)->Join();
+	 	 	  if( this->threads[i]->IsAlive())
+	 	 		this->threads[i]->Join();
 	 }
-
- /*  synchronized(this->lock){
-		while(this->WorkingThreads() || this->PendingTasks()){
-			 std::cout<<"IN Join WorkingThreads=="<< this->WorkingThreads() <<" PendingTasks=="<< this->PendingTasks()<<std::endl;
-			this->lock.Wait();
-		}
-	}*/
 	 std::cout<<"OUT Join."<<std::endl;
-
  }
 
 /*!
  *\brief Causes this thread pool to begin executions.
  */
 void ThreadPool::Start() {
-	 std::cout<<"IN Start WorkingThreads=="<< this->WorkingThreads() <<" PendingTasks=="<< this->PendingTasks()<<std::endl;
+	 std::cout<<">ThreadPool::Start WorkingThreads=="<< this->WorkingThreads() <<" PendingTasks=="<< this->PendingTasks()<<std::endl;
 	if (this->WorkingThreads() || !this->PendingTasks())
 		return;
-
-	 std::cout<<"IN Start in progress ..."<<std::endl;
+	this->threads.clear();
 
 	unsigned l = std::min(this->PendingTasks(),this->tnumber);
+	 std::cout<<"ThreadPool::Start in progress ... L="<<l<<std::endl;
 	for(unsigned instance = 0;instance < l;instance++) {
-		Thread *thread =NULL;
+ 		Thread *thread=new Thread(new RunnableThreadPool(( JobQueue* )this->jobQ ) ,false,instance);
  		 std::cout<<"     > Starting  "<<instance<< "/"<<l<<std::endl;
-  		thread=new Thread(new RunnableThreadPool(this->lock ) ,false,instance);
+
+  		this->threads.push_back(thread);
   		thread->Start(NULL);
-  		this->threads->push_back(thread);
 	}
-	 std::cout<<"IN Start in Done ..."<<std::endl;
+	 std::cout<<"<<ThreadPool::Start  Done ..."<<std::endl;
 }
+
 ThreadPool::~ThreadPool() {
- 	for ( size_t i = 0; i < this->threads->size(); i++ )
- 	  delete this->threads->at(i) ;
-	delete this->threads ;
- }
+	 std::cout<<">>~ThreadPool..."<<std::endl;
+	 if(!this->threads.empty())
+	 for ( size_t i = 0; i <  this->threads.size(); i++ )
+	 	 	   delete this->threads[i];
+
+	 std::cout<<"<<~ThreadPool..."<<std::endl;
+
+}
+
 }
 
 
