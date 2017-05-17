@@ -41,7 +41,8 @@
 #include <exception>
 #include <stdexcept>
 #include <queue>
-//#include <thread>
+#include <thread>
+#include <mutex>
 
 #include <pthread.h>
 #include <sstream>
@@ -53,6 +54,9 @@
 #include <typeinfo>
 #include <sys/types.h>
 #include "dbg.h"
+
+
+#include <condition_variable>
 
 #define MIN_NB_TH_POOL 2
 /*!
@@ -78,7 +82,15 @@ namespace util {
  * }
  *\endcode
  */
-#define synchronized(M)  for(Mutex lck(M,true); lck; lck.Release())
+
+
+//std::lock_guard<std::mutex> lock(M.ctx_new.mutex)
+//#define synchronized(M)  for(std::lock_guard<std::mutex> lock(M.ctx_new.mutex); lock; lck.Release())
+//#define synchronized(M)  for( (&M)->Acquire(); M; (&M)->Release())
+//#define synchronized(M) for( std::unique_lock<std::mutex> lock(M.native_handle()) ; lock.owns_lock(); lock.unlock())
+#define synchronized(M) for( std::unique_lock<std::mutex> lock{(&M)->native_handle()} ;(&M)->setLockTmp(lock) && lock.owns_lock(); lock.unlock())
+
+
 #define DESTROY(V) do{if(V) delete V; V =NULL;}while(0)
 template<class > class Observable;
 template<class > class EventObject;
@@ -104,20 +116,7 @@ public:
 
 	 */
 	Mutex();
-	/*!
-	 * \brief Copy constructor.
-	 * This constructor will lock on the same mutex.
-	 * @param other to copy from.
-	 */
-	Mutex(Mutex& other);
 
-	/*!
-	 *\brief Copy constructor.
-	 * This constructor will lock on the same mutex.
-	 * @param other to copy from.
-	 * @param lock: this means that the mutex will lock at the cpy time.
-	 */
-	Mutex(Mutex& other, bool lock);
 	/*!
 	 *\brief Causes the caller thread to wait until another thread invokes the Notify().
 	 * @return true if waited successfully.
@@ -128,6 +127,8 @@ public:
 	 * @param time the maximum time to wait in milliseconds. MUTEX is assumed to be locked before..
 	 * \return true if waited successfully.
 	 **/
+ 	//bool Wait2 = [&]() { return true; };
+
 	bool Wait(long int time);
 	/*!
 	 * \brief Wakes up the thread that is waiting on this Mutex.
@@ -149,20 +150,44 @@ public:
 	 * \brief Potentially enable other threads to pass.
 	 * Releasing an acquire that is already free has no effect..
 	 */
-	void Release();
+//	void Release();
 	/*!
 	 * \brief Wait until successful passage.
 	 */
-	void Acquire();
+//	void Acquire();
+
+	  std::mutex& native_handle() const;
+ 	  bool setLockTmp( std::unique_lock<std::mutex>& lock_tmp);
+//	 for( std::unique_lock<std::mutex>* lock = new  std::unique_lock<std::mutex>(this->mutex->native_handle()) ; lock->owns_lock(); lock->unlock())
+
+
 private:
-	typedef struct _context {
-		pthread_mutex_t* mutex;
-		pthread_cond_t* cond_waiter;
-		int nbWaitingTh;
-		std::vector<pthread_t> locked;
-	} m_context;
-	m_context *ctx;
+	/*!
+		 * \brief Copy constructor.
+		 * This constructor will lock on the same mutex.
+		 * @param other to copy from.
+		 */
+		Mutex(Mutex& other);
+
+		/*!
+		 *\brief Copy constructor.
+		 * This constructor will lock on the same mutex.
+		 * @param other to copy from.
+		 * @param lock: this means that the mutex will lock at the cpy time.
+		 */
+		Mutex(Mutex& other, bool lock);
 	bool isCopy;
+    std::mutex *mutex;
+
+    //std::unique_lock <std::mutex>* global_lock ;
+ 	bool locked ;
+
+ 	std::condition_variable *cond_var;
+	   std::unique_lock<std::mutex>* lock_tmp;
+
+  // std::lock_guard<std::unique_lock<std::mutex>> *  lock_guard;
+
+
 //	bool released;
 
 };
@@ -192,12 +217,13 @@ public:
 class Thread: virtual public Runnable {
 private:
 	Runnable* _run;
-	//std::thread *thread;
-	pthread_t _pthread;
+	//pthread_t _pthread;
 	void* appData;
 	bool _deamon;
 	int _hyperthread_core_id;
 	bool hyper;
+	std::thread *thread;
+
 	#ifdef __APPLE__
 	bool thread_helper;
 	#endif
@@ -276,11 +302,15 @@ public:
 	/*!
 	 *\brief Gets currently working threads number.
 	 */
-	virtual unsigned WorkingThreads();
+	virtual unsigned WorkingThreads() const;
 	/*!
 	 *\brief Gets currently pending task (not yet started) number.
 	 */
-	virtual unsigned PendingTasks();
+	virtual unsigned PendingTasks() const;
+	/*!
+		 *\brief Gets currently max supported H-threads number.
+		 */
+	virtual unsigned GetPlatformHyperThreadNumber()const;
 	/*!
 	 *\brief  Waits for all threads to finish( task job became empty & all thread are in idle state)).
 	 */

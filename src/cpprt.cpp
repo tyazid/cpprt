@@ -27,6 +27,8 @@
 
 
 #include "rt_internal.h"
+#include "../inc/dbg.h"
+#include "../inc/cpprt.h"
 
 
 using namespace std;
@@ -58,15 +60,17 @@ class JobQueue;
 		 while((j=this->popJob()))
 			 delete j;
 	 }
+//#define synchronized(M)  for( M.Acquire(); M; M.Release())
+
 	void addJob(util::Runnable* rjob, void*arg) {
-		synchronized(this->mutex)
+  		 synchronized(this->mutex)
 		{
 			this->jobs.push(new util::Job(rjob, arg));
 		}
 	}
 	Job* popJob() {
 		Job*j = NULL;
-	 	synchronized(this->mutex)
+	  synchronized(this->mutex)
 		{
 			if (this->jobs.empty())
 				j= NULL;
@@ -112,7 +116,7 @@ class JobQueue;
 
 };
 
-
+/*
  static unsigned ncpus(void) {
  	unsigned nprocs = 0;
  	FILE *cmd = popen("grep '^processor' /proc/cpuinfo | wc -l", "r");
@@ -129,7 +133,7 @@ class JobQueue;
  	return nprocs;
  }
 
- /* nb core */
+ // nb core
   static unsigned coreNumber(void) {
   	static unsigned num_threads = 0;
  	if (!num_threads) {
@@ -139,7 +143,7 @@ class JobQueue;
  	}
   	return num_threads;
   }
-
+*/
 
 /*
 static JobQueue* defaultJobQueue(bool release) {
@@ -153,136 +157,91 @@ static JobQueue* defaultJobQueue(bool release) {
 	return Q;
 }
 */
-static bool existTh(vector<pthread_t> & locked) // Mutex* This)
-{
-	pthread_t thread = pthread_self();
-	for (unsigned i = 0; i < locked.size(); ++i)
-		if (EQ_TH(locked[i], thread))
-			return true;
-	return false;
-}
-bool addTh(vector<pthread_t>& locked)
-{
-	DLOG_INF();
-	pthread_t thread = pthread_self();
-	DLOG_LOGL( "addTh thread = " << TH_LOG( thread ));
 
-	for (unsigned i = 0; i < locked.size(); i++)
-	{
-		if (EQ_TH(locked[i], thread))
-		{
-			DLOG_LOGL( " RET = FALSE");DLOG_OUTF();
-			return false;
-		}
-	}
-	locked.push_back(thread);
-	DLOG_OUTF();
-	return true;
 
-}
-bool rmTh(vector<pthread_t> &locked)
-{
-	DLOG_INF();
-	pthread_t thread = pthread_self();
-	for (unsigned i = 0; i < locked.size(); i++)
-		if (EQ_TH(locked[i], thread))
-		{
-			locked.erase(locked.begin() + i);
-			DLOG_LOGL( " RET = TRUE");DLOG_OUTF();
-			return true;
-		}DLOG_OUTF();
-	return false;
-}
 
-static bool setTime(long int time, struct timespec& ts)
-{
-	DLOG_INF();
-	struct timeval tp;
 
-	assert(gettimeofday(&tp, NULL) != -1); //cannot get time!;
-	memset(&ts, 0, sizeof(struct timespec));
-	ts.tv_sec = tp.tv_sec;
-	long int usec = (time % (long int) 1E3l); //
-	usec *= 1000;
-	usec += tp.tv_usec;
-	usec *= 1000;
-	ts.tv_nsec += usec;	//nano sec
-	ts.tv_sec += (time_t) (ts.tv_nsec / 1E9L);
-	ts.tv_nsec %= (time_t) 1E9L;
-	ts.tv_sec += time / 1000;
-	DLOG_OUTF();
-	return true;
-
-}
-
+#define USER_NEW_MTX
 Mutex::Mutex() :
-		ctx(NULL), isCopy(false)/*, released(true)*/
+		   isCopy(false),
+		   mutex(new std::mutex),
+		/*global_lock(new std::unique_lock<std::mutex> (*mutex, std::defer_lock)),*/
+		locked(false),
+		cond_var(new std::condition_variable),lock_tmp(NULL)
 {
 	DLOG_INF();
-	INIT(ctx, m_context);
+	cout<<"### MUTEX CREATE IN ("<<this->mutex<<")"<<endl;
 
-	INIT(ctx->cond_waiter, pthread_cond_t);
-	INIT(ctx->mutex, pthread_mutex_t);
-	if (pthread_mutex_init(ctx->mutex, NULL))
-	{
-		ctx->mutex = NULL;
-		DLOG_LOGL( " Raised runtime_error");DLOG_OUTF();
-		throw std::runtime_error("cannot create mutex !");
-	}DLOG_OUTF();
+	DLOG_OUTF();
 }
 
 Mutex::Mutex(Mutex& other, bool lock) :
-		ctx(other.ctx), isCopy(true)
+		  isCopy(true),
+		  mutex(new std::mutex),
+		/*global_lock(new std::unique_lock<std::mutex> (*mutex, std::defer_lock)),*/
+		locked(false),
+		cond_var(new std::condition_variable),lock_tmp(NULL)
 {
 	DLOG_INF();
-	assert(ctx->mutex);
+
 	if (lock)
 	{
 		DLOG_LOGL(" WARNIN IN MTX COPY/bool == > WILL LOCK ");
-		Acquire();
+		//Acquire();
 	}DLOG_OUTF();
 }
 Mutex::Mutex(Mutex& other) :
-		ctx(other.ctx), isCopy(true)/*, released(false)*/
+		  isCopy(true),
+		  mutex(new std::mutex),
+		/*global_lock(new std::unique_lock<std::mutex> (*mutex, std::defer_lock)),*/
+		locked(false),
+		cond_var(new std::condition_variable),lock_tmp(NULL)
+
 {
 	DLOG_INF();DLOG_LOGL(" WARNIN IN MTX COPY == > WILL NOT LOCK " );
-	assert(ctx->mutex);DLOG_OUTF();
+#ifndef USER_NEW_MTX
+	assert(ctx->mutex);
+#endif
+ 	DLOG_OUTF();
 
 }
 Mutex::~Mutex()
 {
-	DLOG_INF();
-	DLOG_LOGL(" isCopy:"<<isCopy );
-	if (!isCopy)
-	{
-		Release();
-		pthread_mutex_destroy(ctx->mutex);
-		pthread_cond_destroy(ctx->cond_waiter);
-		DESTROY(ctx->mutex);
-		DESTROY(ctx->cond_waiter);
-		DESTROY(ctx);
-	}
-	DLOG_OUTF();
+	DLOG_INF()
+	;
+	DLOG_LOGL(" isCopy:"<<isCopy);
+	cout<<"### MUTEX DESTROY IN ("<<this->mutex<<")"<<endl;
+
+	//delete global_lock;
+	delete cond_var;
+	delete mutex;
+	DLOG_OUTF()
+	;
 }
+
+
+bool Mutex::setLockTmp(  std::unique_lock<std::mutex>& lock_tmp) {
+	this->lock_tmp = &lock_tmp;
+	return true;
+}
+
 bool Mutex::Wait(long int time)
 {
 	DLOG_INF();
-	int rc = -1;
+	/*if (!this->global_lock)
+		return false;*/
+	if(!this->lock_tmp)
+		return false;
 
-	assert(*this);/*will interpret the overridden bool op.*/
-	ctx->nbWaitingTh++;
-	if (time > 0)
-	{
-		struct timespec ts;
-		setTime(time, ts);
-		rc = pthread_cond_timedwait(ctx->cond_waiter, ctx->mutex, &ts);
-	} else
-	{
-		rc = pthread_cond_wait(ctx->cond_waiter, ctx->mutex);
-	}
-	assert(rc==0 || rc == ETIMEDOUT);	//	("cannot pthread wait !"); */
+	std::unique_lock< std::mutex>& lock=*this->lock_tmp;
+	this->lock_tmp=NULL;
+	locked = false;
+	const std::chrono::milliseconds timeout(time > 0 ? time : 0);
 
-	ctx->nbWaitingTh--;
+	if (time <= 0)
+		this->cond_var->wait(lock);
+	else
+		this->cond_var->wait_for(lock, timeout);
 	DLOG_OUTF();
 	return true;
 }
@@ -297,58 +256,60 @@ bool Mutex::Wait()
 bool Mutex::Notify()
 {
 	DLOG_INF();
-	if (!ctx->locked.empty())
-	{
-		if (ctx->nbWaitingTh && !pthread_cond_signal(ctx->cond_waiter))
-		{
-			DLOG_LOGL("OK" );
-			DLOG_OUTF();
-			return true;
-		}
+	//if(!this->global_lock)
+		//return false;
+	this->cond_var->notify_one();
 
-	} else
-	{
-		DLOG_LOGL("/!\\not locked mutex! in Notify!!!" );
-		///throw std::runtime_error("not locked mutex! in Notify");
-	}
 	DLOG_OUTF();
-	return false;
+	return true;//TODO
 }
 
 bool Mutex::NotifyAll()
 {
 	DLOG_INF();
-	bool b = (!ctx->locked.empty() && ctx->nbWaitingTh && !pthread_cond_broadcast(ctx->cond_waiter));
+	//if(!this->global_lock)
+		//return false;
+	this->cond_var->notify_all();
 	DLOG_OUTF();
-	return b;
+	return true;//TODO
 }
-
+/*
 void Mutex::Release()
 {
 	DLOG_INF();
-	if (ctx->mutex == NULL || !ctx->locked.size() || !rmTh(ctx->locked))
-		return;
-	DLOG_LOGL( "<MTX release mtx    " << ctx->mutex << ", locked.size=" << ctx->locked.size());
-	pthread_mutex_unlock(ctx->mutex);
+
+	cout<<"## MUTEX RELEASE IN ("<<this->mutex<<")"<<endl;
+
+	mutex->unlock();
+	cout<<"## MUTEX RELEASE OUT ("<<this->mutex<<")"<<endl;
+
+	locked=false;
+
 	DLOG_OUTF();
 }
 
 void Mutex::Acquire()
 {
 	DLOG_INF();
-	assert(ctx->mutex);	//no mutex !
-	if (!addTh(ctx->locked))
-		return;
-	/*released = false;*/
-	DLOG_LOGL(">MTX acquire mtx    " << ctx->mutex << ", locked.size=" << ctx->locked.size());
-	pthread_mutex_lock(ctx->mutex);
-	DLOG_OUTF();
-}
+	//pthread_mutex_lock
+///	global_lock = new  std::unique_lock<std::mutex>(mutex);
+	locked=true;
+	cout<<"## MUTEX ACQUIRE IN ("<<this->mutex<<")"<<endl;
+	mutex->lock();
+	cout<<"## MUTEX ACQUIRE OUT ("<<this->mutex<<")"<<endl;
 
+	//std::gar
+    DLOG_OUTF();
+}*/
+std::mutex& Mutex::native_handle() const
+  {
+	 return *(this->mutex);
+	}
 Mutex::operator bool() const
 {
 	DLOG_INF();
-	bool b=ctx->locked.size() > 0 && existTh(this->ctx->locked);
+
+	bool b=	locked;//this->global_lock && this->global_lock->owns_lock();
 	DLOG_OUTF();
 	return b;
 }
@@ -359,31 +320,35 @@ typedef struct thread_arg
 {
 	void* app_data;
 	Runnable* job;
+	bool alive;
 } Thread_Ctx;
+#define FREE_THREAD_CTX(C) do{if (C){\
+							C->app_data = NULL;\
+							C->job = NULL;\
+							free(C);\
+							}}while(0)
+
+
+#define ALLOC_THREAD_CTX(C) do{\
+							C = (Thread_Ctx*)malloc(sizeof(Thread_Ctx));\
+							assert(C); \
+							memset(C,0,sizeof(Thread_Ctx));\
+							}while(0)
+
 static void *doIt(void *arg)
 {
 	DLOG_INF();
 	Thread_Ctx* parm = (Thread_Ctx*) arg;
-	// std::cout<<std::endl<<"--------- IN DOIT -------- ?::"<< ((parm && parm->job)?1:0)<<std::endl;
-
+	parm->alive = true;
+	 std::cout<<std::endl<<"##(CPP RT) Starting TH:"<<  std::this_thread::get_id()<<"  ON CPU:"<< sched_getcpu() <<std::endl;
 	if (parm && parm->job)
 		try
 		{
 			// std::cout<<std::endl<<"--------- STARTING JOB  -------- ?::"<< (parm->job)<<std::endl;
-
 			parm->job->Run(parm->app_data);
-		} catch (...)
-		{
-		}
-
-	if (parm && parm->job)
-	{
-		parm->app_data = NULL;
-		parm->job = NULL;
-		delete parm;
-	}
+		} catch (...){}
+	 FREE_THREAD_CTX(parm);
 	// std::cout<<std::endl<<"--------- OUT DOIT -------- ?::"<< ((parm && parm->job)?1:0)<<std::endl;
-
 	DLOG_OUTF();
 	return NULL;  // ((Thread *)context)->doIt(((Thread *)context)->appData);
 }
@@ -400,7 +365,8 @@ _run(task ? task : this), appData(NULL)
 	_pthread.x = ULONG_MAX;
 }
 #else
-Thread::Thread(bool deamon) :_run(this), _pthread(ULONG_MAX), appData(NULL),_deamon(deamon),_hyperthread_core_id(0),hyper(false)
+Thread::Thread(bool deamon) :_run(this),  appData(NULL),
+		_deamon(deamon),_hyperthread_core_id(0),hyper(false),thread(NULL)
 {
 	DLOG_INF();
 	DLOG_OUTF();
@@ -411,11 +377,10 @@ Thread::Thread(Runnable* task ,bool deamon,int hyperthreadCoreId) :
 	 thread_helper(false),
 
 #endif /* __APPLE__*/
-	_pthread(ULONG_MAX),
 	appData(NULL),
 	_deamon(deamon),
 	_hyperthread_core_id(hyperthreadCoreId),
-	hyper(hyperthreadCoreId>=0?true:false)
+	hyper(hyperthreadCoreId>=0?true:false),thread(NULL)
 {
 	DLOG_INF();
 	DLOG_OUTF();
@@ -426,22 +391,29 @@ Thread::Thread(Runnable* task ,bool deamon,int hyperthreadCoreId) :
 #endif /* _WIN32*/
 
 Thread::Thread(const Thread&other) :
-		_run(other._run), 
-		_pthread(other._pthread),
+		_run(other._run),
 		appData(other.appData),
 		_deamon(other._deamon),
 		_hyperthread_core_id(other._hyperthread_core_id),
-		hyper(other.hyper)
+		hyper(other.hyper),thread(NULL)
 {
 }
 Thread::~Thread()
 {
-	DLOG_INF(); DLOG_LOGL( " Thread DESTROY  ON TH =" << this);
-	Join();
+	DLOG_INF();
+	DLOG_LOGL( " Thread DESTROY  ON TH =" << this);
 	if (!this->_deamon) {
-		if (_pthread != ULONG_MAX) {
+#ifdef __APPLE__
+		 if(thread_helper)
+#else
+		if ( this->thread )
+#endif /* __APPLE__*/
+		 {
 			try {
-				pthread_detach(_pthread);
+				this->thread->detach();
+				delete this->thread;
+				this->thread=NULL;
+			///	pthread_detach(_pthread);
 			} catch (...) {
 				DLOG_LOGL( " pthread_detach  failed  on TH" <<this );
 			}
@@ -457,39 +429,46 @@ void Thread::Run(void* arg)
 void Thread::Start(void* arg)
 {
 	DLOG_INF();
-	Thread_Ctx* parm = new Thread_Ctx;
+	DLOG_LOGL( " Thread Start  ON TH =" << this );
+
+	Thread_Ctx* parm;
 	DLOG_LOGL( " Thread Start  ON TH =" << this );
 	DLOG_LOGL( " Thread START  ON P =" << parm );
-	//pthread_create(struct thread_arg*) malloc(
-	//	sizeof(struct thread_arg));
-	assert(parm);		//no mutex !
+	ALLOC_THREAD_CTX(parm);
 	parm->app_data = arg;
 	parm->job = this->_run;
-	int th_start = pthread_create(&_pthread, NULL, &doIt, parm);
-	DLOG_LOGL( "Thread START th_start =" << th_start);
-	if (th_start != 0)
-	{
-		parm->app_data = NULL;
-		parm->job = NULL;
-		delete parm;
-	} else
-	{
-		/*hyper threading stuff.*/
-		  int num_threads =coreNumber();
 
+
+	 std::cout<<"      > IN Start Thread :: Started in Hyper Th mode "<<std::endl;
+
+
+	this->thread = new std::thread(doIt, parm);
+
+
+	if (!this->thread)
+	{
+		 FREE_THREAD_CTX(parm);
+ 	} else
+	{
+		 std::cout<<"     > IN Start Thread :: Created ok "<<std::endl;
+
+		/*hyper threading stuff.*/
+		static int num_threads = -1;
+		if (num_threads == -1)
+			num_threads = std::thread::hardware_concurrency();
 		if (num_threads != -1 && this->_hyperthread_core_id >= 0
 				&& this->_hyperthread_core_id < num_threads) {
 			cpu_set_t cpuset;
 			CPU_ZERO(&cpuset);
 			CPU_SET(this->_hyperthread_core_id, &cpuset);
-			int rc = pthread_setaffinity_np(this->_pthread,
+			int rc = pthread_setaffinity_np(this->thread->native_handle(),
 					sizeof(cpu_set_t), &cpuset);
 			if (rc != 0) {
 				std::cerr << "!!!!Error calling pthread_setaffinity_np: " << rc
 						<< "\n";
 			}
 
-			rc = pthread_getaffinity_np(this->_pthread,
+			rc = pthread_getaffinity_np(this->thread->native_handle(),
 					sizeof(cpu_set_t), &cpuset);
 			if (rc != 0)
 				std::cerr << "!!!!Error calling pthread_getaffinity_np: " << rc
@@ -497,16 +476,21 @@ void Thread::Start(void* arg)
  			if (!CPU_ISSET(this->_hyperthread_core_id, &cpuset))
 				std::cerr << "!!!!Error : could not set cpu affinity cpu: "
 						<< this->_hyperthread_core_id << "\n";
+ 			 std::cout<<"     		> IN Start Thread :: Started in Hyper Th mode "<<std::endl;
 
 
 		}
 	} 
+	 std::cout<<"     		< OUT Start Thread   "<<std::endl;
+
 	DLOG_OUTF();
 }
 
 void Thread::Join()
 {
 	DLOG_INF();
+	 std::cout<<"     		> IN Start Thread::Join()   "<<std::endl;
+
 #if defined _WIN32
 	if (_pthread.x != ULONG_MAX)
 	{
@@ -515,54 +499,62 @@ void Thread::Join()
 	}
 #else
 
-	if (_pthread != ULONG_MAX)
-	{	 std::cout<<">>>TH.Join IN "<<std::endl;
-
-		pthread_join(_pthread, NULL);
-		_pthread = ULONG_MAX;
-	}else
-		std::cout<<">>>TH.Join NOT "<<std::endl;
+#ifdef __APPLE__
+	 if(thread_helper)
+#else
+	 if (this->thread )
 #endif
+	{
+		// std::cout<< std::endl<<"################ J O I N "<<this->thread->native_handle()<< std::endl;
+		 this->thread ->join();
+		//pthread_join(_pthread, NULL);
+
+
+	 delete this->thread;
+	 this->thread=NULL;
+
+	}
+#endif
+	 std::cout<<"     		< OUT Start Thread::Join()   "<<std::endl;
+
 	DLOG_OUTF();
 
 }
 //IsAlive
 bool Thread::IsAlive() {
-	return (_pthread != ULONG_MAX) && (pthread_kill(_pthread, 0) == ESRCH) ?
-			true : false;
-}
+	return (this->thread && this->thread->joinable() ) ?true : false;
+ }
 
-#define ALIGN_TH_POOL(N) N<MIN_NB_TH_POOL?\
-						 MIN_NB_TH_POOL:(N>coreNumber()? coreNumber()  : N)
+#define ALIGN_TH_POOL(N) N<1?\
+						 1:(N> std::thread::hardware_concurrency()?  std::thread::hardware_concurrency()  : N)
 
 ThreadPool::ThreadPool(unsigned num_threads):tnumber( ALIGN_TH_POOL(num_threads)),
-											 hyperThreaded(false),working(0),jobQ(NULL)
+											 hyperThreaded(false),
+											 working(0),jobQ(NULL)
 											 {
 
 }
-ThreadPool::ThreadPool(bool hyperthread):tnumber(MIN_NB_TH_POOL),
+ThreadPool::ThreadPool(bool hyperthread):tnumber(1),
 										hyperThreaded(hyperthread),
-										working(0) ,jobQ(NULL){
+										working(0) ,jobQ(new JobQueue){
 
-	this->tnumber= (hyperthread?ALIGN_TH_POOL(coreNumber()):MIN_NB_TH_POOL);
+	this->tnumber= (hyperthread?ALIGN_TH_POOL( std::thread::hardware_concurrency()):1);
 
 }
 
 ThreadPool::ThreadPool(unsigned num_threads, bool hyperthread):
 										tnumber( ALIGN_TH_POOL(num_threads)),
 										hyperThreaded(hyperthread),
-										working(0) ,jobQ(NULL) {}
+										working(0) ,jobQ(new JobQueue) {}
 
 ThreadPool::ThreadPool(const ThreadPool& other):tnumber( ALIGN_TH_POOL(other.tnumber)),
 												hyperThreaded(other.hyperThreaded),
-												working(0),jobQ(NULL) {}
+												working(0),jobQ(new JobQueue) {}
 
 
 
 
 void ThreadPool::AddTask(Runnable* task, void* arg) {
-	if (!this->jobQ)
-		this->jobQ = new JobQueue;
 
 	JobQueue* q = (JobQueue*) this->jobQ;
 //	 JobQueue* q = defaultJobQueue(false);
@@ -573,30 +565,45 @@ void ThreadPool::AddTask(Runnable* task, void* arg) {
 }
 
 
-unsigned ThreadPool::WorkingThreads() {
+unsigned ThreadPool::WorkingThreads() const {
 	unsigned w=0;
 
 
 	for ( size_t i = 0; i <  this->threads.size(); i++ )
-	 	  if(  this->threads[i]->IsAlive())
+	 	  if(this->threads.at(i) && this->threads.at(i)->IsAlive())
 	 		  w++;
 	return w;
 }
 
-unsigned ThreadPool::PendingTasks() {
+unsigned ThreadPool::PendingTasks() const{
 	 JobQueue* q =( JobQueue* )this->jobQ;
 	return q->jobs.size();
 }
+
+  unsigned ThreadPool::GetPlatformHyperThreadNumber() const{
+	  return this->tnumber;
+  }
+
 
 //PendingTasks
 void ThreadPool::Join() {
 	 std::cout<<"IN Join "<<std::endl;
 	 for ( size_t i = 0; i <  this->threads.size(); i++ ){
-		 std::cout<<"--- Join:"<<i<<std::endl;
-
-	 	 	  if( this->threads[i]->IsAlive())
-	 	 		this->threads[i]->Join();
+		 std::cout<<"---> Join:"<<i<<std::endl;
+		 std::cout<<"--->    Joint:"<<this->threads[i]<<std::endl;
+		 std::cout<<"--->    Joina:"<<this->threads[i]->IsAlive()<<std::endl;
+		 try
+		 {
+			 if( this->threads[i] && this->threads[i]->IsAlive())
+			 	 this->threads[i]->Join();
+		 }
+		 catch (std::exception& e)
+		 {
+		     std::cerr << "!!!!!!!!!!! in cpp-rt Exception catched : " << e.what() << std::endl;
+		 }
+	  std::cout<<"---< Join:"<<i<<std::endl;
 	 }
+	 if(this->jobQ )
 	 std::cout<<"OUT Join."<<std::endl;
  }
 
@@ -626,12 +633,12 @@ ThreadPool::~ThreadPool() {
 	 if(!this->threads.empty())
 	 for ( size_t i = 0; i <  this->threads.size(); i++ )
 	 	 	   delete this->threads[i];
+	if(this->jobQ)
+		delete ( JobQueue* )this->jobQ;
 
 	 std::cout<<"<<~ThreadPool..."<<std::endl;
 
 }
 
 }
-
-
 
