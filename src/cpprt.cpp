@@ -30,7 +30,6 @@
 #include "../inc/dbg.h"
 #include "../inc/cpprt.h"
 
-
 using namespace std;
 using namespace util;
 
@@ -525,31 +524,68 @@ bool Thread::IsAlive() {
 	return (this->thread && this->thread->joinable() ) ?true : false;
  }
 
+
+
+bool Thread::SetPriority(Thread::Priority prio, bool fifo){
+int __sched_priority; //Thread::
+int __policy;
+switch (prio) {
+	case MAX_PRIORITY:
+		__policy = fifo ? SCHED_FIFO : SCHED_RR;
+		__sched_priority = sched_get_priority_max(__policy);
+ 		break;
+	case MIN_PRIORITY:
+		__policy= SCHED_IDLE;
+		__sched_priority = 0;
+
+			break;
+	case NORM_PRIORITY:
+		__policy= SCHED_OTHER;
+		 __sched_priority = 0;
+			break;
+	default:
+	return false;
+}
+
+sched_param sch_params;
+sch_params.sched_priority = __sched_priority;
+cout<<"### THREAD SET PRIOR (PRIORITY="<<__sched_priority<<" , POLICY=" <<__policy<<  ")"<<endl;
+
+if (this->thread && pthread_setschedparam(this->thread->native_handle(), __policy, &sch_params)) {
+		std::cerr << "Failed to set Thread scheduling : "
+				<< std::strerror(errno) << std::endl;
+		return false;
+	}
+
+	return true;
+}
+
+
 #define ALIGN_TH_POOL(N) N<1?\
 						 1:(N> std::thread::hardware_concurrency()?  std::thread::hardware_concurrency()  : N)
 
 ThreadPool::ThreadPool(unsigned num_threads):tnumber( ALIGN_TH_POOL(num_threads)),
 											 hyperThreaded(false),
-											 working(0),jobQ(NULL)
+											 working(0),priority(Thread::NORM_PRIORITY),priorityFifo(false),jobQ(NULL)
 											 {
 
 }
 ThreadPool::ThreadPool(bool hyperthread):tnumber(1),
 										hyperThreaded(hyperthread),
-										working(0) ,jobQ(new JobQueue){
+										working(0) ,priority(Thread::NORM_PRIORITY),priorityFifo(false),jobQ(new JobQueue){
 
-	this->tnumber= (hyperthread?ALIGN_TH_POOL( std::thread::hardware_concurrency()):1);
+ this->tnumber= (hyperthread?ALIGN_TH_POOL( std::thread::hardware_concurrency()):1);
 
 }
 
 ThreadPool::ThreadPool(unsigned num_threads, bool hyperthread):
 										tnumber( ALIGN_TH_POOL(num_threads)),
 										hyperThreaded(hyperthread),
-										working(0) ,jobQ(new JobQueue) {}
+										working(0) ,priority(Thread::NORM_PRIORITY),priorityFifo(false),jobQ(new JobQueue) {}
 
 ThreadPool::ThreadPool(const ThreadPool& other):tnumber( ALIGN_TH_POOL(other.tnumber)),
 												hyperThreaded(other.hyperThreaded),
-												working(0),jobQ(new JobQueue) {}
+												working(0),priority(Thread::NORM_PRIORITY),priorityFifo(false),jobQ(new JobQueue) {}
 
 
 
@@ -607,25 +643,34 @@ void ThreadPool::Join() {
 	 std::cout<<"OUT Join."<<std::endl;
  }
 
+
+void ThreadPool::SetThreadsPriority(Thread::Priority prio, bool fifo){
+this->priority = prio;
+this->priorityFifo=fifo;
+}
+
 /*!
  *\brief Causes this thread pool to begin executions.
  */
 void ThreadPool::Start() {
-	 std::cout<<">ThreadPool::Start WorkingThreads=="<< this->WorkingThreads() <<" PendingTasks=="<< this->PendingTasks()<<std::endl;
+	std::cout << ">ThreadPool::Start WorkingThreads==" << this->WorkingThreads()
+			<< " PendingTasks==" << this->PendingTasks() << std::endl;
 	if (this->WorkingThreads() || !this->PendingTasks())
 		return;
 	this->threads.clear();
-
-	unsigned l = std::min(this->PendingTasks(),this->tnumber);
-	 std::cout<<"ThreadPool::Start in progress ... L="<<l<<std::endl;
-	for(unsigned instance = 0;instance < l;instance++) {
- 		Thread *thread=new Thread(new RunnableThreadPool(( JobQueue* )this->jobQ ) ,false,instance);
- 		 std::cout<<"     > Starting  "<<instance<< "/"<<l<<std::endl;
-
-  		this->threads.push_back(thread);
-  		thread->Start(NULL);
+	unsigned l = std::min(this->PendingTasks(), this->tnumber);
+	std::cout << "ThreadPool::Start in progress ... L=" << l << std::endl;
+	for (unsigned instance = 0; instance < l; instance++) {
+		Thread *thread = new Thread(
+				new RunnableThreadPool((JobQueue*) this->jobQ), false,
+				instance);
+		std::cout << "     > Starting  " << instance << "/" << l << std::endl;
+		this->threads.push_back(thread);
+		thread->Start(NULL);
+		if (this->priority != Thread::NORM_PRIORITY)
+			thread->SetPriority(this->priority, this->priorityFifo);
 	}
-	 std::cout<<"<<ThreadPool::Start  Done ..."<<std::endl;
+	std::cout << "<<ThreadPool::Start  Done ..." << std::endl;
 }
 
 ThreadPool::~ThreadPool() {

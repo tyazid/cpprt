@@ -230,6 +230,7 @@ private:
 
 
 public:
+	enum Priority{MIN_PRIORITY,NORM_PRIORITY, MAX_PRIORITY};
 	/**
 	 * \brief Default constructor.
 	 * construct and init a new Thread.
@@ -271,6 +272,8 @@ public:
 	virtual void Join();
 
 	virtual bool IsAlive();
+
+ 	bool SetPriority(Priority , bool);
 };
 
 /***************************************************************/
@@ -284,6 +287,8 @@ private :
 	unsigned tnumber;
 	bool hyperThreaded;
 	unsigned working;
+	Thread::Priority priority;
+	bool priorityFifo;
 	Mutex lock;
 	std::vector<Thread*> threads;
 public:
@@ -320,6 +325,7 @@ public:
 	 */
 	virtual void Start();
 
+	void SetThreadsPriority(Thread::Priority , bool);
 	virtual ~ThreadPool();
 
 	void* jobQ; /*opaque*/

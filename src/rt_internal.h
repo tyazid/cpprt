@@ -32,6 +32,8 @@
 #include <stdexcept>
 #include <queue>
 #include <pthread.h>
+#include <sched.h>
+
 #include <unistd.h>
 #include <time.h>
 #include <climits>
@@ -55,7 +57,7 @@
 #include <exception>
 #include <stdexcept>
 #include <stdio.h>
-
+#include <cstring>
 #define EQUAL_TIME(TM1,TM2) (difftime(mktime(TM1), mktime(TM2)) == 0.0)
 #define INIT(V,TYPE) do{V = new TYPE; memset(V, 0, sizeof(TYPE));}while(0)
 #define DEL(V) if(V){cout<< "DELETE OBJ" << typeid(V).name() << endl;delete V; V=NULL;}
