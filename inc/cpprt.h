@@ -293,10 +293,10 @@ private :
 	std::vector<Thread*> threads;
 public:
 	//h == treu --> nbth == nb core.
-	ThreadPool(bool hyperthread =false);
+	ThreadPool(bool hyperthread =true);
 
-	ThreadPool(unsigned num_threads = MIN_NB_TH_POOL);
-	ThreadPool(unsigned num_threads = MIN_NB_TH_POOL, bool hyperthread =false);
+	ThreadPool(unsigned num_threads  );
+	ThreadPool(unsigned num_threads , bool hyperthread =true);
 	ThreadPool(const ThreadPool&other);
 
 	/*!
@@ -308,6 +308,8 @@ public:
 	 *\brief Gets currently working threads number.
 	 */
 	virtual unsigned WorkingThreads() const;
+
+	virtual unsigned ThreadCount() const;
 	/*!
 	 *\brief Gets currently pending task (not yet started) number.
 	 */

@@ -644,6 +644,11 @@ void ThreadPool::Join() {
  }
 
 
+unsigned ThreadPool::ThreadCount() const{
+	return this->threads.size();
+}
+
+
 void ThreadPool::SetThreadsPriority(Thread::Priority prio, bool fifo){
 this->priority = prio;
 this->priorityFifo=fifo;
